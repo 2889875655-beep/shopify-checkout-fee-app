@@ -1,4 +1,22 @@
 {
+  "name": "shopify-checkout-fee-app",
+  "version": "1.0.0",
+  "description": "Shopify结账费用应用 - 仅美国地区收取8%税+2%保险",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  },
+  "keywords": ["shopify", "checkout", "fee", "app"],
+  "author": "Your Name",
+  "license": "MIT",
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}{
   "name": "fee-calculator",
   "version": "1.0.0",
   "main": "server.js",
