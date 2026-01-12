@@ -1,0 +1,13 @@
+name = "checkout fee app"
+client_id = "d68d290d24a6c542a3858cafefe4261f"
+application_url = "https://shopify-checkout-fee-app.vercel.app"
+embedded = true
+
+[access_scopes]
+use = ["read_orders", "write_orders", "read_customers"]
+
+[auth]
+redirect_urls = [ "https://shopify-checkout-fee-app.vercel.app/auth/callback" ]
+
+[webhooks]
+api_version = "2026-01"
