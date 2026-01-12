@@ -134,7 +134,7 @@ app.get('/test', (req, res) => {
       </style>
     </head>
     <body>
-      <h1>地区智能费用计算器</h1>
+      <h1>🌍 地区智能费用计算器</h1>
       <p>专为 skullisjewelry.com 开发 | 规则: 仅美国地区收取 8%税 + 2%保险</p>
       
       <div class="tab">
@@ -147,7 +147,7 @@ app.get('/test', (req, res) => {
         <div class="card">
           <h3>地区智能费用计算</h3>
           <div class="info">
-            <strong>规则说明:</strong> 
+            <strong>💡 规则说明:</strong> 
             <ul>
               <li>美国地区: 收取 8%销售税 + 2%保险费</li>
               <li>其他地区: 不收取额外费用</li>
@@ -258,7 +258,7 @@ app.get('/test', (req, res) => {
             }
             
             resultDiv.innerHTML = \`
-              <h4>费用明细 \${regionBadge}</h4>
+              <h4>📋 费用明细 \${regionBadge}</h4>
               <p><small>\${data.region_info.message}</small></p>
               <div class="fee-row">
                 <span>订单金额:</span>
@@ -321,7 +321,7 @@ app.get('/', (req, res) => {
   res.send(`
     <html>
     <body style="font-family: Arial; padding: 40px;">
-      <h1>地区智能费用计算服务</h1>
+      <h1>🌍 地区智能费用计算服务</h1>
       <p>版本 2.0 - 新增地区智能检测</p>
       <div style="background: #f0f8ff; padding: 20px; border-radius: 10px; margin: 20px 0;">
         <h3>🚀 新功能：地区限制规则</h3>
@@ -347,17 +347,17 @@ app.get('/', (req, res) => {
 // ============ 启动服务器 ============
 app.listen(PORT, () => {
   console.log('='.repeat(50));
-  console.log('地区智能费用计算服务器已启动');
+  console.log('✅ 地区智能费用计算服务器已启动');
   console.log('='.repeat(50));
-  console.log('本地访问: http://localhost:' + PORT);
-  console.log('测试页面: http://localhost:' + PORT + '/test');
-  console.log('API端点:');
+  console.log('🌐 本地访问: http://localhost:' + PORT);
+  console.log('🧪 测试页面: http://localhost:' + PORT + '/test');
+  console.log('📡 API端点:');
   console.log('   POST /calculate - 智能费用计算');
   console.log('   POST /check-region - 地区检测');
   console.log('='.repeat(50));
-  console.log('核心业务逻辑:');
-  console.log('   仅美国地区: 8%税 + 2%保险');
-  console.log('   其他地区: 无额外费用');
-  console.log('   自动地区检测');
+  console.log('🎯 核心业务逻辑:');
+  console.log('   ✅ 仅美国地区: 8%税 + 2%保险');
+  console.log('   ❌ 其他地区: 无额外费用');
+  console.log('   📍 自动地区检测');
   console.log('='.repeat(50));
 });
