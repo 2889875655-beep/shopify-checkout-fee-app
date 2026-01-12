@@ -8,12 +8,12 @@
     "dev": "node server.js"
   },
   "dependencies": {
-    "express": "^4.18.2",
-    "@shopify/shopify-api": "^12.0.0",
-    "@shopify/shopify-app-session-storage-memory": "^5.0.0",
-    "dotenv": "^16.0.3",
-    "node-fetch": "^2.6.7"
-  },
+  "express": "^4.18.2",
+  "@shopify/shopify-api": "^9.3.0",  // 保留旧版本
+  "dotenv": "^16.0.3",
+  "node-fetch": "^2.6.7"
+  // 移除 @shopify/shopify-app-session-storage-memory
+}
   "keywords": [
     "shopify",
     "checkout",
