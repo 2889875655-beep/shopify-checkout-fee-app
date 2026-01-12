@@ -103,6 +103,13 @@ app.get('/auth/callback', async (req, res) => {
   }
 });
 
+//======================在 server.js 中添加==================
+app.get('/checkout-fee-display.js', (req, res) => {
+  res.setHeader('Content-Type', 'application/javascript');
+  // 直接返回上面的脚本内容，或从文件读取
+  res.send(fs.readFileSync('./checkout-fee-display.js', 'utf8'));
+});
+
 // ==================== Webhook 注册函数 ====================
 async function registerWebhook(shop, accessToken) {
   try {
