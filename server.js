@@ -1,254 +1,35 @@
-/*******************************************************************************
- * 地区智能费用计算 Shopify 应用
- * 功能：当美国地址下单时，自动添加 8%销售税 + 2%保险费
- * 作者：为 skullisjewelry.com 定制开发
- ******************************************************************************/
-
 const express = require('express');
-const { shopifyApi, LATEST_API_VERSION, Session } = require('@shopify/shopify-api');
-const { MemorySessionStorage } = require('@shopify/shopify-app-session-storage-memory');
-require('dotenv').config();
-
-// ==================== 初始化 Express ====================
 const app = express();
+
+// 解析 JSON 请求
 app.use(express.json());
 
-// ==================== Shopify API 配置 ====================
-const shopify = shopifyApi({
-  apiKey: process.env.SHOPIFY_API_KEY,
-  apiSecretKey: process.env.SHOPIFY_API_SECRET,
-  scopes: process.env.SHOPIFY_SCOPES?.split(',') || ['read_orders', 'write_orders'],
-  hostName: process.env.HOST?.replace(/https?:\/\//, ''),
-  hostScheme: 'https',
-  apiVersion: LATEST_API_VERSION,
-  isEmbeddedApp: true,
-  sessionStorage: new MemorySessionStorage(),
-});
+const PORT = 3000;
 
-// ==================== 内存存储（生产环境请替换为数据库） ====================
-const shopStorage = new Map();
-
-async function saveShopSession(shop, accessToken) {
-  shopStorage.set(shop, {
-    accessToken,
-    installedAt: new Date().toISOString()
-  });
-  console.log(`✅ 店铺 ${shop} 的访问令牌已保存`);
-}
-
-async function getShopSession(shop) {
-  return shopStorage.get(shop);
-}
-
-// ==================== 地区检测函数（你的原有逻辑） ====================
+// ============ 地区检测函数 ============
 const isUSRegion = (countryCode, zipCode) => {
   if (!countryCode) return false;
+  
+  // 转换为大写以便比较
   const country = countryCode.toUpperCase();
+  
+  // 1. 检查国家代码
   if (country !== 'US') return false;
   
+  // 2. 可选：验证美国邮编格式 (5位数字或5+4格式)
   if (zipCode) {
     const usZipRegex = /^\d{5}(-\d{4})?$/;
     return usZipRegex.test(zipCode);
   }
+  
   return true;
 };
 
-// ==================== Shopify OAuth 授权路由 ====================
-app.get('/auth', async (req, res) => {
-  try {
-    const shop = req.query.shop;
-    if (!shop) {
-      return res.status(400).send('缺少店铺参数，请提供 ?shop=your-store.myshopify.com');
-    }
-
-    console.log(`🔄 开始安装流程，店铺：${shop}`);
-    
-    const authRoute = await shopify.auth.begin({
-      shop,
-      callbackPath: '/auth/callback',
-      isOnline: false,
-      rawRequest: req,
-      rawResponse: res,
-    });
-    
-    res.redirect(authRoute);
-  } catch (error) {
-    console.error('❌ OAuth 初始化失败:', error);
-    res.status(500).send('OAuth 初始化失败: ' + error.message);
-  }
-});
-
-app.get('/auth/callback', async (req, res) => {
-  try {
-    const callback = await shopify.auth.callback({
-      rawRequest: req,
-      rawResponse: res,
-    });
-
-    const { shop, accessToken } = callback.session;
-    
-    // 保存访问令牌
-    await saveShopSession(shop, accessToken);
-    
-    console.log(`🎉 应用成功安装到店铺：${shop}`);
-    
-    // 注册 Webhook
-    await registerWebhook(shop, accessToken);
-    
-    // 重定向回 Shopify 后台
-    res.redirect(`https://${shop}/admin/apps/${process.env.SHOPIFY_API_KEY}`);
-  } catch (error) {
-    console.error('❌ OAuth 回调失败:', error);
-    res.status(500).send(`<h1>安装失败</h1><p>${error.message}</p><p><a href="/">返回首页</a></p>`);
-  }
-});
-
-//======================在 server.js 中添加==================
-app.get('/checkout-fee-display.js', (req, res) => {
-  res.setHeader('Content-Type', 'application/javascript');
-  // 直接返回上面的脚本内容，或从文件读取
-  res.send(fs.readFileSync('./checkout-fee-display.js', 'utf8'));
-});
-
-// ==================== Webhook 注册函数 ====================
-async function registerWebhook(shop, accessToken) {
-  try {
-    const webhookAddress = `${process.env.HOST}/webhooks/orders_create`;
-    
-    const response = await fetch(`https://${shop}/admin/api/2026-01/webhooks.json`, {
-      method: 'POST',
-      headers: {
-        'X-Shopify-Access-Token': accessToken,
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-      },
-      body: JSON.stringify({
-        webhook: {
-          topic: 'orders/create',
-          address: webhookAddress,
-          format: 'json'
-        }
-      })
-    });
-
-    if (response.ok) {
-      console.log(`✅ 已为 ${shop} 注册 orders/create Webhook`);
-    } else {
-      const error = await response.text();
-      console.error(`❌ Webhook 注册失败 (${shop}):`, error);
-    }
-  } catch (error) {
-    console.error(`❌ Webhook 注册异常 (${shop}):`, error.message);
-  }
-}
-
-// ==================== 核心：订单创建 Webhook 处理 ====================
-app.post('/webhooks/orders_create', express.json(), async (req, res) => {
-  console.log('📦 收到订单创建 Webhook');
-  
-  try {
-    const order = req.body;
-    const shop = req.headers['x-shopify-shop-domain'];
-    
-    if (!shop) {
-      console.error('❌ 缺少店铺域名头部');
-      return res.status(400).send('Missing shop domain');
-    }
-
-    console.log(`  店铺: ${shop}, 订单号: ${order.order_number || order.id}`);
-    
-    // 1. 获取访问令牌
-    const session = await getShopSession(shop);
-    if (!session || !session.accessToken) {
-      console.error(`❌ 找不到店铺 ${shop} 的访问令牌`);
-      return res.status(500).send('Shop not authenticated');
-    }
-
-    // 2. 提取地址信息
-    const address = order.shipping_address || order.billing_address;
-    const countryCode = address?.country_code;
-    const zipCode = address?.zip;
-    
-    console.log(`  收货地址: ${countryCode}, ${zipCode}`);
-    
-    // 3. 使用你的原有逻辑判断是否为美国地址
-    const isUS = isUSRegion(countryCode, zipCode);
-    
-    if (!isUS) {
-      console.log(`  ⏩ 非美国地址 (${countryCode})，跳过费用添加`);
-      return res.status(200).json({ 
-        status: 'skipped',
-        reason: '非美国地址',
-        country: countryCode 
-      });
-    }
-    
-    // 4. 计算费用（重用你的原有逻辑）
-    const subtotal = parseFloat(order.subtotal_price || order.current_subtotal_price || '0');
-    const taxAmount = subtotal * 0.08;      // 8% 销售税
-    const insuranceAmount = subtotal * 0.02; // 2% 保险费
-    const totalFee = taxAmount + insuranceAmount;
-    
-    console.log(`  🇺🇸 美国订单检测：小计$${subtotal.toFixed(2)}，添加费用$${totalFee.toFixed(2)}`);
-    
-    // 5. 调用 Shopify API 添加交易记录（即添加费用）
-    const transactionResponse = await fetch(
-      `https://${shop}/admin/api/2026-01/orders/${order.id}/transactions.json`,
-      {
-        method: 'POST',
-        headers: {
-          'X-Shopify-Access-Token': session.accessToken,
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        body: JSON.stringify({
-          transaction: {
-            currency: order.currency || 'USD',
-            amount: totalFee.toFixed(2),
-            kind: 'sale',
-            source: 'external',
-            gateway: 'manual',
-            note: `US Sales Tax (8%): $${taxAmount.toFixed(2)} + Insurance (2%): $${insuranceAmount.toFixed(2)}`
-          }
-        })
-      }
-    );
-
-    if (transactionResponse.ok) {
-      console.log(`  ✅ 成功为订单 #${order.order_number} 添加费用`);
-      res.status(200).json({ 
-        status: 'success',
-        message: '费用已添加',
-        fees: {
-          tax: taxAmount.toFixed(2),
-          insurance: insuranceAmount.toFixed(2),
-          total: totalFee.toFixed(2)
-        }
-      });
-    } else {
-      const errorText = await transactionResponse.text();
-      console.error(`  ❌ 添加费用失败:`, errorText);
-      res.status(500).json({ 
-        status: 'error',
-        message: 'Failed to add fee',
-        error: errorText 
-      });
-    }
-    
-  } catch (error) {
-    console.error('💥 Webhook 处理异常:', error);
-    res.status(500).json({ 
-      status: 'error',
-      message: 'Internal server error',
-      error: error.message 
-    });
-  }
-});
-
-// ==================== 你的原有 API 端点（保持不变） ====================
+// ============ 你的核心业务逻辑（带地区检测） ============
 app.post('/calculate', (req, res) => {
-  const { amount, country, zipCode } = req.body;
+  const { amount, country, zipCode, region } = req.body;
   
+  // 验证金额
   if (!amount || isNaN(amount) || amount <= 0) {
     return res.status(400).json({ 
       error: '请输入有效的正数金额',
@@ -257,14 +38,19 @@ app.post('/calculate', (req, res) => {
   }
   
   const subtotal = parseFloat(amount);
-  const isUS = isUSRegion(country, zipCode);
+  
+  // 检查是否是美国地区
+  const countryCode = country || req.headers['x-country-code'] || req.query.country;
+  const userZipCode = zipCode || req.headers['x-zip-code'] || req.query.zip;
+  const isUS = isUSRegion(countryCode, userZipCode);
   
   if (!isUS) {
+    // 非美国地区：无额外费用
     return res.json({
       success: true,
       region_info: {
-        country: country || '未指定',
-        zip_code: zipCode || '未指定',
+        country: countryCode || '未指定',
+        zip_code: userZipCode || '未指定',
         is_us: false,
         message: '非美国地区，无额外税费和保险费'
       },
@@ -281,15 +67,16 @@ app.post('/calculate', (req, res) => {
     });
   }
   
-  const tax = subtotal * 0.08;
-  const insurance = subtotal * 0.02;
+  // 美国地区：计算 8%税 + 2%保险
+  const tax = subtotal * 0.08;      // 8% 税
+  const insurance = subtotal * 0.02; // 2% 保险
   const total = subtotal + tax + insurance;
   
   res.json({
     success: true,
     region_info: {
       country: 'US',
-      zip_code: zipCode || '未指定',
+      zip_code: userZipCode || '未指定',
       is_us: true,
       message: '美国地区适用: 8%税 + 2%保险'
     },
@@ -307,6 +94,7 @@ app.post('/calculate', (req, res) => {
   });
 });
 
+// ============ 地区检测测试端点 ============
 app.post('/check-region', (req, res) => {
   const { country, zipCode } = req.body;
   const isUS = isUSRegion(country, zipCode);
@@ -320,172 +108,256 @@ app.post('/check-region', (req, res) => {
   });
 });
 
-// ==================== 应用主页 ====================
-app.get('/', (req, res) => {
+// ============ 增强版测试页面 ============
+app.get('/test', (req, res) => {
   res.send(`
     <!DOCTYPE html>
     <html>
     <head>
       <meta charset="UTF-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>地区智能费用计算 Shopify 应用</title>
+      <title>地区智能费用计算器</title>
       <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
-               max-width: 800px; margin: 0 auto; padding: 20px; line-height: 1.6; }
-        .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-                  color: white; padding: 40px; border-radius: 10px; margin-bottom: 30px; }
-        .card { background: white; border-radius: 10px; padding: 25px; margin: 20px 0; 
-                box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-        .btn { display: inline-block; background: #667eea; color: white; 
-               padding: 12px 24px; border-radius: 5px; text-decoration: none; 
-               font-weight: bold; margin: 10px 5px; }
-        .btn-secondary { background: #6c757d; }
-        .feature { display: flex; align-items: center; margin: 15px 0; }
-        .feature-icon { font-size: 24px; margin-right: 15px; }
-        .code { background: #f8f9fa; padding: 15px; border-radius: 5px; 
-                font-family: 'Courier New', monospace; margin: 10px 0; }
-        .status { padding: 10px; border-radius: 5px; margin: 10px 0; }
-        .status-success { background: #d4edda; color: #155724; }
-        .status-info { background: #d1ecf1; color: #0c5460; }
+        body { font-family: Arial, sans-serif; max-width: 700px; margin: 40px auto; padding: 20px; }
+        .card { background: #f8f9fa; border-radius: 10px; padding: 25px; margin: 20px 0; }
+        .tab { display: flex; margin-bottom: 20px; }
+        .tab button { flex: 1; padding: 10px; border: none; background: #e9ecef; cursor: pointer; }
+        .tab button.active { background: #007bff; color: white; }
+        .region-badge { display: inline-block; padding: 5px 10px; border-radius: 20px; font-size: 14px; margin-left: 10px; }
+        .us-badge { background: #28a745; color: white; }
+        .non-us-badge { background: #6c757d; color: white; }
+        input, select, button { padding: 12px; margin: 8px 0; width: 100%; box-sizing: border-box; }
+        button { background: #007bff; color: white; border: none; cursor: pointer; }
+        .result { background: #d4edda; padding: 20px; border-radius: 5px; margin-top: 20px; }
+        .fee-row { display: flex; justify-content: space-between; margin: 5px 0; }
+        .total { font-weight: bold; border-top: 2px solid #007bff; padding-top: 10px; }
+        .info { background: #e7f3ff; padding: 15px; border-radius: 5px; margin: 15px 0; }
       </style>
     </head>
     <body>
-      <div class="header">
-        <h1>🇺🇸 地区智能费用计算</h1>
-        <p>专为 skullisjewelry.com 定制开发的 Shopify 应用</p>
-        <p>版本 2.0 - 完全集成 Shopify 平台</p>
+      <h1>地区智能费用计算器</h1>
+      <p>专为 skullisjewelry.com 开发 | 规则: 仅美国地区收取 8%税 + 2%保险</p>
+      
+      <div class="tab">
+        <button class="tab-btn active" onclick="switchTab('calculator')">💰 费用计算</button>
+        <button class="tab-btn" onclick="switchTab('region')">🌐 地区检测</button>
       </div>
       
-      <div class="card">
-        <h2>🚀 核心功能</h2>
-        <div class="feature">
-          <div class="feature-icon">🔍</div>
-          <div>
-            <strong>智能地区检测</strong>
-            <p>自动识别美国地址，精准应用费用规则</p>
+      <!-- 费用计算标签页 -->
+      <div id="calculator-tab" class="tab-content">
+        <div class="card">
+          <h3>地区智能费用计算</h3>
+          <div class="info">
+            <strong>规则说明:</strong> 
+            <ul>
+              <li>美国地区: 收取 8%销售税 + 2%保险费</li>
+              <li>其他地区: 不收取额外费用</li>
+              <li>根据国家代码和邮编自动检测</li>
+            </ul>
           </div>
-        </div>
-        <div class="feature">
-          <div class="feature-icon">💰</div>
-          <div>
-            <strong>自动费用计算</strong>
-            <p>美国地区：8%销售税 + 2%保险费</p>
-            <p>其他地区：无额外费用</p>
-          </div>
-        </div>
-        <div class="feature">
-          <div class="feature-icon">⚡</div>
-          <div>
-            <strong>实时处理</strong>
-            <p>订单创建时自动添加费用，无需人工操作</p>
+          
+          <label>订单金额 ($):</label>
+          <input type="number" id="amount" value="100.00" step="0.01" min="0.01">
+          
+          <label>国家代码 (2位字母):</label>
+          <select id="country">
+            <option value="US">🇺🇸 美国 (US)</option>
+            <option value="CA">🇨🇦 加拿大 (CA)</option>
+            <option value="GB">🇬🇧 英国 (GB)</option>
+            <option value="AU">🇦🇺 澳大利亚 (AU)</option>
+            <option value="JP">🇯🇵 日本 (JP)</option>
+            <option value="CN">🇨🇳 中国 (CN)</option>
+            <option value="DE">🇩🇪 德国 (DE)</option>
+            <option value="FR">🇫🇷 法国 (FR)</option>
+            <option value="OTHER">其他地区</option>
+          </select>
+          
+          <label>邮编/邮政编码 (可选):</label>
+          <input type="text" id="zipCode" placeholder="例如: 10001 (美国邮编)" value="10001">
+          
+          <button onclick="calculateWithRegion()">智能计算费用</button>
+          
+          <div id="result" class="result" style="display:none;">
+            <!-- 结果将显示在这里 -->
           </div>
         </div>
       </div>
       
-      <div class="card">
-        <h2>📊 费用规则</h2>
-        <div class="status status-success">
-          <strong>美国地区 (US)</strong>
-          <p>✅ 收取 8%销售税 + 2%保险费</p>
-          <p>📍 根据国家代码和邮编自动检测</p>
-        </div>
-        <div class="status status-info">
-          <strong>其他地区</strong>
-          <p>✅ 不收取任何额外费用</p>
+      <!-- 地区检测标签页 -->
+      <div id="region-tab" class="tab-content" style="display:none;">
+        <div class="card">
+          <h3>地区检测测试</h3>
+          <p>测试不同地区的检测结果</p>
+          
+          <label>国家代码:</label>
+          <select id="testCountry">
+            <option value="US">US (美国)</option>
+            <option value="CA">CA (加拿大)</option>
+            <option value="GB">GB (英国)</option>
+            <option value="JP">JP (日本)</option>
+            <option value="AU">AU (澳大利亚)</option>
+            <option value="">空值</option>
+          </select>
+          
+          <label>邮编:</label>
+          <input type="text" id="testZip" placeholder="输入邮编测试">
+          
+          <button onclick="testRegion()">检测地区</button>
+          
+          <div id="regionResult" style="margin-top: 20px;"></div>
         </div>
       </div>
       
-      <div class="card">
-        <h2>🔧 安装与测试</h2>
-        <p>将此应用安装到您的 Shopify 商店：</p>
-        <div class="code">
-          https://${process.env.HOST}/auth?shop=your-store.myshopify.com
-        </div>
+      <script>
+        // 切换标签页
+        function switchTab(tabName) {
+          document.querySelectorAll('.tab-content').forEach(el => el.style.display = 'none');
+          document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+          
+          document.getElementById(tabName + '-tab').style.display = 'block';
+          event.target.classList.add('active');
+        }
         
-        <a href="/test" class="btn">🧪 测试费用计算</a>
-        <a href="/check-region" class="btn btn-secondary">🌐 测试地区检测</a>
+        // 费用计算
+        async function calculateWithRegion() {
+          const amount = document.getElementById('amount').value;
+          const country = document.getElementById('country').value;
+          const zipCode = document.getElementById('zipCode').value;
+          
+          const response = await fetch('/calculate', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ 
+              amount: amount,
+              country: country,
+              zipCode: zipCode
+            })
+          });
+          
+          const data = await response.json();
+          const resultDiv = document.getElementById('result');
+          
+          if (data.error) {
+            resultDiv.innerHTML = \`<p style="color: #dc3545;">❌ \${data.error}</p>\`;
+          } else {
+            const regionBadge = data.region_info.is_us ? 
+              '<span class="region-badge us-badge">美国地区</span>' : 
+              '<span class="region-badge non-us-badge">非美国地区</span>';
+            
+            let feesHtml = '';
+            if (data.region_info.is_us) {
+              feesHtml = \`
+                <div class="fee-row">
+                  <span>➕ 税费 (\${data.fees.tax.rate}):</span>
+                  <span>\$\${data.fees.tax.amount}</span>
+                </div>
+                <div class="fee-row">
+                  <span>➕ 保险费 (\${data.fees.insurance.rate}):</span>
+                  <span>\$\${data.fees.insurance.amount}</span>
+                </div>
+              \`;
+            }
+            
+            resultDiv.innerHTML = \`
+              <h4>费用明细 \${regionBadge}</h4>
+              <p><small>\${data.region_info.message}</small></p>
+              <div class="fee-row">
+                <span>订单金额:</span>
+                <span>\$\${data.totals.subtotal}</span>
+              </div>
+              \${feesHtml}
+              <div class="fee-row total">
+                <span>💰 订单总计:</span>
+                <span>\$\${data.totals.total}</span>
+              </div>
+              <p><small>\${data.summary}</small></p>
+            \`;
+          }
+          resultDiv.style.display = 'block';
+        }
         
-        <p style="margin-top: 20px;">
-          <strong>API 端点：</strong>
-          <br>POST <code>/calculate</code> - 智能费用计算
-          <br>POST <code>/check-region</code> - 地区检测
-          <br>POST <code>/webhooks/orders_create</code> - Shopify Webhook
-        </p>
-      </div>
-      
-      <div class="card">
-        <h2>📈 当前状态</h2>
-        <p>✅ 地区检测逻辑已就绪</p>
-        <p>✅ 费用计算 API 已就绪</p>
-        <p>✅ Shopify OAuth 集成已就绪</p>
-        <p>✅ Webhook 处理已就绪</p>
-        <p>🔄 等待安装到 Shopify 商店</p>
-      </div>
-      
-      <div class="card">
-        <h2>📝 技术信息</h2>
-        <p><strong>应用类型：</strong> Shopify 私有定制应用</p>
-        <p><strong>目标客户：</strong> skullisjewelry.com</p>
-        <p><strong>部署平台：</strong> Vercel</p>
-        <p><strong>技术栈：</strong> Node.js, Express, Shopify API</p>
-        <p><strong>数据存储：</strong> 内存存储（单店铺适用）</p>
-      </div>
-      
-      <footer style="text-align: center; margin-top: 40px; color: #6c757d; font-size: 0.9em;">
-        <p>© 2025 地区智能费用计算应用 - 为 skullisjewelry.com 定制开发</p>
-        <p>注意：此应用仅适用于美国地区的订单处理</p>
-      </footer>
+        // 地区检测
+        async function testRegion() {
+          const country = document.getElementById('testCountry').value;
+          const zipCode = document.getElementById('testZip').value;
+          
+          const response = await fetch('/check-region', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ 
+              country: country,
+              zipCode: zipCode
+            })
+          });
+          
+          const data = await response.json();
+          const resultDiv = document.getElementById('regionResult');
+          
+          const badge = data.is_us ? 
+            '<span class="region-badge us-badge">美国地区</span>' : 
+            '<span class="region-badge non-us-badge">非美国地区</span>';
+          
+          resultDiv.innerHTML = \`
+            <div class="card">
+              <h4>地区检测结果</h4>
+              <p><strong>国家:</strong> \${data.country}</p>
+              <p><strong>邮编:</strong> \${data.zip_code}</p>
+              <p><strong>检测结果:</strong> \${badge}</p>
+              <p><strong>规则应用:</strong> \${data.rules_applied}</p>
+              <p><em>\${data.message}</em></p>
+            </div>
+          \`;
+        }
+        
+        // 页面加载时自动计算一次（美国示例）
+        window.onload = calculateWithRegion;
+      </script>
     </body>
     </html>
   `);
 });
 
-// ==================== 你的原有测试页面 ====================
-app.get('/test', (req, res) => {
-  // 你的原有测试页面 HTML 代码（保持原样）
-  // 由于篇幅限制，这里省略，你可以直接复制你原来的 /test 路由代码
-  res.send('测试页面 - 请使用你原有的测试页面代码');
+// ============ 首页 ============
+app.get('/', (req, res) => {
+  res.send(`
+    <html>
+    <body style="font-family: Arial; padding: 40px;">
+      <h1>地区智能费用计算服务</h1>
+      <p>版本 2.0 - 新增地区智能检测</p>
+      <div style="background: #f0f8ff; padding: 20px; border-radius: 10px; margin: 20px 0;">
+        <h3>🚀 新功能：地区限制规则</h3>
+        <ul>
+          <li><strong>美国地区</strong>: 收取 8%销售税 + 2%保险费</li>
+          <li><strong>其他地区</strong>: 无额外费用</li>
+          <li><strong>自动检测</strong>: 根据国家代码和邮编判断</li>
+        </ul>
+      </div>
+      <p><a href="/test">🧪 前往测试页面</a></p>
+      <p><strong>API端点:</strong></p>
+      <ul>
+        <li>POST <code>/calculate</code> - 智能费用计算</li>
+        <li>POST <code>/check-region</code> - 地区检测</li>
+      </ul>
+      <hr>
+      <p>为 <strong>skullisjewelry.com</strong> 开发 | 地区限制: 仅美国</p>
+    </body>
+    </html>
+  `);
 });
 
-// ==================== 健康检查端点 ====================
-app.get('/health', (req, res) => {
-  res.json({
-    status: 'healthy',
-    timestamp: new Date().toISOString(),
-    version: '2.0.0',
-    features: {
-      region_detection: true,
-      fee_calculation: true,
-      shopify_integration: true,
-      webhook_processing: true
-    }
-  });
-});
-
-// ==================== 启动服务器 ====================
-const PORT = process.env.PORT || 3000;
+// ============ 启动服务器 ============
 app.listen(PORT, () => {
-  console.log('='.repeat(60));
-  console.log('🚀 地区智能费用计算 Shopify 应用已启动');
-  console.log('='.repeat(60));
-  console.log(`本地地址: http://localhost:${PORT}`);
-  console.log(`部署地址: ${process.env.HOST}`);
-  console.log('='.repeat(60));
-  console.log('🔑 Shopify 配置:');
-  console.log(`   API Key: ${process.env.SHOPIFY_API_KEY?.substring(0, 10)}...`);
-  console.log(`   作用域: ${process.env.SHOPIFY_SCOPES}`);
-  console.log('='.repeat(60));
-  console.log('🛠️  可用路由:');
-  console.log('   GET  /                    - 应用主页');
-  console.log('   GET  /auth?shop=...      - 安装应用到 Shopify');
-  console.log('   GET  /test               - 测试页面');
-  console.log('   POST /calculate          - 费用计算 API');
-  console.log('   POST /check-region       - 地区检测 API');
-  console.log('   POST /webhooks/orders_create - Shopify Webhook');
-  console.log('='.repeat(60));
-  console.log('💡 安装说明:');
-  console.log(`   1. 访问 ${process.env.HOST}/auth?shop=skullisjewelry.myshopify.com`);
-  console.log('   2. 在 Shopify 后台完成授权');
-  console.log('   3. 应用将自动开始处理订单');
-  console.log('='.repeat(60));
+  console.log('='.repeat(50));
+  console.log('地区智能费用计算服务器已启动');
+  console.log('='.repeat(50));
+  console.log('本地访问: http://localhost:' + PORT);
+  console.log('测试页面: http://localhost:' + PORT + '/test');
+  console.log('API端点:');
+  console.log('   POST /calculate - 智能费用计算');
+  console.log('   POST /check-region - 地区检测');
+  console.log('='.repeat(50));
+  console.log('核心业务逻辑:');
+  console.log('   仅美国地区: 8%税 + 2%保险');
+  console.log('   其他地区: 无额外费用');
+  console.log('   自动地区检测');
+  console.log('='.repeat(50));
 });
