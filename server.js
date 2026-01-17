@@ -344,6 +344,42 @@ app.get('/', (req, res) => {
   `);
 });
 
+// ============ 新增：扩展文件支持 ============
+// 把这个代码块添加到 app.get('/', ...) 之后，app.listen 之前
+app.get('/extensions/checkout-fee/shopify.extension.toml', (req, res) => {
+  res.setHeader('Content-Type', 'text/plain');
+  res.send(`
+schema_version = "2023-07"
+name = "checkout-fee-extension"
+type = "checkout_ui"
+handle = "checkout-fee"
+
+[[targeting]]
+target = "purchase.checkout.block.render"
+
+[settings]
+[[settings.fields]]
+key = "tax_rate"
+name = "Tax Rate (%)"
+type = "number"
+default_value = 8
+
+[[settings.fields]]
+key = "insurance_rate"
+name = "Insurance Rate (%)"
+type = "number"
+default_value = 2
+  `);
+});
+
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'ok',
+    message: '结账费用应用运行正常',
+    version: '2.0'
+  });
+});
+
 // ============ 启动服务器 ============
 app.listen(PORT, () => {
   console.log('='.repeat(50));
