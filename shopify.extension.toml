@@ -1,0 +1,20 @@
+schema_version = "2023-07"
+name = "checkout-fee-extension"
+type = "checkout_ui"
+handle = "checkout-fee"
+
+[[targeting]]
+target = "purchase.checkout.block.render"
+
+[settings]
+[[settings.fields]]
+key = "tax_rate"
+name = "Tax Rate (%)"
+type = "number"
+default_value = 8
+
+[[settings.fields]]
+key = "insurance_rate"
+name = "Insurance Rate (%)"
+type = "number"
+default_value = 2
