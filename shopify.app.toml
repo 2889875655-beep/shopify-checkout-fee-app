@@ -1,6 +1,6 @@
 name = "结账费用应用程序"
 client_id = "d68d290d24a6c542a3858cafefe4261f"
-application_url = "https://shopify-checkout-fee-app-e2n9-e6wi5vu7o-small-fishs-projects.vercel.app"
+application_url = "https://shopify-checkout-fee-app.vercel.app"
 embedded = true
 
 [build]
@@ -20,7 +20,7 @@ scopes = [
 
 [auth]
 redirect_urls = [
-  "https://shopify-checkout-fee-app-e2n9-e6wi5vu7o-small-fishs-projects.vercel.app/auth/callback"
+  "https://shopify-checkout-fee-app.vercel.app/auth/callback"
 ]
 
 [webhooks]
