@@ -1,13 +1,36 @@
-# name = "checkout fee app"
-# client_id = "d68d290d24a6c542a3858cafefe4261f"
-# application_url = "https://shopify-checkout-fee-app.vercel.app"
-# embedded = true
+name = "结账费用应用程序"
+client_id = "d68d290d24a6c542a3858cafefe4261f"
+application_url = "https://shopify-checkout-fee-app-e2n9-e6wi5vu7o-small-fishs-projects.vercel.app"
+embedded = true
 
-# [access_scopes]
-# use = ["read_orders", "write_orders", "read_customers"]
+[build]
+include_config_on_deploy = true
 
-# [auth]
-# redirect_urls = [ "https://shopify-checkout-fee-app.vercel.app/auth/callback" ]
+[access_scopes]
+use_legacy_install_flow = false
 
-# [webhooks]
-# api_version = "2026-01"
+scopes = [
+  "write_checkout_files",
+  "write_checkouts",
+  "read_checkouts",
+  "write_orders",
+  "read_orders",
+  "read_customers"
+]
+
+[auth]
+redirect_urls = [
+  "https://shopify-checkout-fee-app-e2n9-e6wi5vu7o-small-fishs-projects.vercel.app/auth/callback"
+]
+
+[webhooks]
+api_version = "2024-01"
+
+# 扩展配置
+[[extensions]]
+type = "checkout_ui"
+name = "checkout-fee-extension"
+handle = "checkout-fee"
+[[extensions.targeting]]
+target = "purchase.checkout.block.render"
+module = "./src/CheckoutFee.jsx"
